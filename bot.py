@@ -1,12 +1,11 @@
-import os
-import sqlite3
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, CallbackQueryHandler, ContextTypes
+import sqlite3
 
-# Get token from Railway
-TOKEN = os.getenv("6872510077:AAFtVniM9OJRPDkjozI8hU52AvoDZ7njtsI")
+# --- Telegram Bot Token ---
+TOKEN = "6872510077:AAFtVniM9OJRPDkjozI8hU52AvoDZ7njtsI"
 
-# Admin username
+# --- Admin username ---
 ADMIN_USERNAME = "MD18073"
 
 # --- Database ---
@@ -37,7 +36,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     reply_markup = InlineKeyboardMarkup(keyboard)
     await update.message.reply_text("🌐 Please choose your language / الرجاء اختيار اللغة:", reply_markup=reply_markup)
 
-# --- Main menu builder ---
+# --- Build main menu ---
 def build_main_menu(lang, is_admin):
     buttons = [
         [InlineKeyboardButton("الرصيد 💰" if lang=='ar' else "Balance 💰", callback_data='balance')],
