@@ -5,8 +5,8 @@ import sqlite3
 # --- Telegram Bot Token ---
 TOKEN = "6872510077:AAFtVniM9OJRPDkjozI8hU52AvoDZ7njtsI"
 
-# --- Admin username ---
-ADMIN_USERNAME = "MD18073"
+# --- Admin usernames ---
+ADMINS = ["MD18073", "Admin2", "Admin3"]  # Add more usernames as needed
 
 # --- Database ---
 conn = sqlite3.connect('botdata.db', check_same_thread=False)
@@ -81,7 +81,7 @@ async def button(update: Update, context: ContextTypes.DEFAULT_TYPE):
         balance = 0
         username = "NoUsername"
 
-    is_admin = username.lower() == ADMIN_USERNAME.lower()
+    is_admin = username.lower() in [a.lower() for a in ADMINS]
 
     # --- Language selection ---
     if query.data.startswith("lang_"):
@@ -143,7 +143,7 @@ async def button(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def topup(update: Update, context: ContextTypes.DEFAULT_TYPE):
     username = update.message.from_user.username or ""
-    if username.lower() != ADMIN_USERNAME.lower():
+    if username.lower() not in [a.lower() for a in ADMINS]:
         await update.message.reply_text("❌ You are not admin / أنت لست مسؤول")
         return
 
@@ -165,7 +165,7 @@ async def topup(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def addproduct(update: Update, context: ContextTypes.DEFAULT_TYPE):
     username = update.message.from_user.username or ""
-    if username.lower() != ADMIN_USERNAME.lower():
+    if username.lower() not in [a.lower() for a in ADMINS]:
         await update.message.reply_text("❌ You are not admin / أنت لست مسؤول")
         return
 
