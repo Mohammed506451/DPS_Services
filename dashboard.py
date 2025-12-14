@@ -49,10 +49,11 @@ def init_db():
         id SERIAL PRIMARY KEY,
         user_id BIGINT,
         amount NUMERIC,
-        method TEXT,
         status TEXT DEFAULT 'pending'
     )
     """)
+    # Add method column if missing
+    cur.execute("ALTER TABLE topups ADD COLUMN IF NOT EXISTS method TEXT")
 
     conn.commit()
     conn.close()
