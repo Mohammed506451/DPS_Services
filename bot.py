@@ -5,8 +5,8 @@ from aiogram import Bot, Dispatcher, types
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.utils import executor
 
-API_TOKEN = os.environ.get("API_TOKEN")
-ADMIN_USERNAME = os.environ.get("ADMIN_USERNAME")
+API_TOKEN = "6872510077:AAFtVniM9OJRPDkjozI8hU52AvoDZ7njtsI"
+ADMIN_USERNAME = "MD18073"
 DATABASE_URL = os.environ.get("DATABASE_URL")
 
 bot = Bot(token=API_TOKEN)
@@ -16,7 +16,7 @@ def get_db():
     conn = psycopg2.connect(DATABASE_URL, cursor_factory=RealDictCursor)
     return conn
 
-# ===== START / LANGUAGE SELECTION =====
+# ===== START / LANGUAGE =====
 @dp.message_handler(commands=["start"])
 async def start(message: types.Message):
     keyboard = InlineKeyboardMarkup()
@@ -32,10 +32,8 @@ async def choose_language(callback_query: types.CallbackQuery):
     lang = callback_query.data.split("_")[1]
 
     keyboard = InlineKeyboardMarkup()
-    # Admin menu
     if callback_query.from_user.username == ADMIN_USERNAME:
         keyboard.add(InlineKeyboardButton("Admin Panel", callback_data="admin_panel"))
-    # User menu
     keyboard.add(InlineKeyboardButton("Show Services", callback_data="show_services"))
 
     await bot.send_message(callback_query.from_user.id, "Main menu:", reply_markup=keyboard)
@@ -63,7 +61,7 @@ async def show_services(callback_query: types.CallbackQuery):
         await bot.send_message(callback_query.from_user.id, "Choose a service:", reply_markup=keyboard)
     await callback_query.answer()
 
-# ===== HANDLE BUY SERVICE =====
+# ===== BUY SERVICE =====
 @dp.callback_query_handler(lambda c: c.data.startswith("buy_"))
 async def buy_service(callback_query: types.CallbackQuery):
     service_id = int(callback_query.data.split("_")[1])
@@ -79,11 +77,11 @@ async def buy_service(callback_query: types.CallbackQuery):
         await bot.send_message(callback_query.from_user.id, "Service not found.")
     await callback_query.answer()
 
-# ===== ADMIN PANEL PLACEHOLDER =====
+# ===== ADMIN PANEL =====
 @dp.callback_query_handler(lambda c: c.data == "admin_panel")
 async def admin_panel(callback_query: types.CallbackQuery):
     if callback_query.from_user.username == ADMIN_USERNAME:
-        await bot.send_message(callback_query.from_user.id, "Admin panel features coming soon!")
+        await bot.send_message(callback_query.from_user.id, "Admin panel coming soon!")
     else:
         await bot.send_message(callback_query.from_user.id, "❌ You are not an admin.")
     await callback_query.answer()
