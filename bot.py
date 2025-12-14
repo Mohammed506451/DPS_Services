@@ -4,18 +4,17 @@ import psycopg2
 from aiogram import Bot, Dispatcher, types
 from aiogram.filters import CommandStart
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
-from aiogram.exceptions import TelegramBadRequest
 
 # ================= CONFIG =================
 BOT_TOKEN = "6872510077:AAFtVniM9OJRPDkjozI8hU52AvoDZ7njtsI"
 ADMIN_USERNAME = "MD18073"
 
-CHANNEL_USERNAME = "@Offerwallproxy"
-
 DATABASE_URL = os.getenv(
     "DATABASE_URL",
     "postgresql://postgres:wTWqoVJnKEDRtDDWFlpJNfSGGRdYCJHB@nozomi.proxy.rlwy.net:22169/railway"
 )
+
+CHANNEL_ID = "@Offerwallproxy"
 
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher()
@@ -27,54 +26,39 @@ def get_db():
 def init_db():
     conn = get_db()
     cur = conn.cursor()
-
     cur.execute("""
     CREATE TABLE IF NOT EXISTS users (
         user_id BIGINT PRIMARY KEY,
         balance NUMERIC DEFAULT 0,
+        lang TEXT,
         total_added NUMERIC DEFAULT 0,
-        total_spent NUMERIC DEFAULT 0,
-        lang TEXT
+        total_spent NUMERIC DEFAULT 0
     )
     """)
-
-    cur.execute("""
-    CREATE TABLE IF NOT EXISTS services (
-        id SERIAL PRIMARY KEY,
-        name TEXT,
-        price NUMERIC
-    )
-    """)
-
     cur.execute("""
     CREATE TABLE IF NOT EXISTS topups (
         id SERIAL PRIMARY KEY,
         user_id BIGINT,
         amount NUMERIC,
-        method TEXT,
-        status TEXT DEFAULT 'pending'
+        status TEXT DEFAULT 'pending',
+        method TEXT
     )
     """)
-
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS products (
+        id SERIAL PRIMARY KEY,
+        category TEXT,
+        name TEXT,
+        message TEXT,
+        price NUMERIC
+    )
+    """)
     conn.commit()
     conn.close()
 
 init_db()
 
-# ================= HELPERS =================
-async def check_subscription(user_id):
-    try:
-        member = await bot.get_chat_member(CHANNEL_USERNAME, user_id)
-        return member.status in ["member", "administrator", "creator"]
-    except TelegramBadRequest:
-        return False
-
-def join_keyboard():
-    return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="✅ Join Channel", url=f"https://t.me/{CHANNEL_USERNAME.replace('@','')}")],
-        [InlineKeyboardButton(text="🔄 Check", callback_data="check_join")]
-    ])
-
+# ================= KEYBOARDS =================
 def lang_keyboard():
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="🇱🇧 العربية", callback_data="lang_ar")],
@@ -82,162 +66,145 @@ def lang_keyboard():
     ])
 
 def main_menu(lang):
-    text = "🛒 Services" if lang == "en" else "🛒 الخدمات"
-    bal = "💰 Balance" if lang == "en" else "💰 الرصيد"
-    return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text=text, callback_data="services")],
-        [InlineKeyboardButton(text=bal, callback_data="balance")]
-    ])
+    if lang == "ar":
+        return InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="🛒 الخدمات", callback_data="services")],
+            [InlineKeyboardButton(text="💰 شحن الرصيد", callback_data="topup")]
+        ])
+    else:
+        return InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="🛒 Services", callback_data="services")],
+            [InlineKeyboardButton(text="💰 Top up balance", callback_data="topup")]
+        ])
 
-def back_button():
+def services_keyboard(category=None):
+    conn = get_db()
+    cur = conn.cursor()
+    keyboard = InlineKeyboardMarkup(row_width=1)
+    if category is None:
+        # Top-level categories
+        buttons = ["PayPal Services", "SSN Services", "Visa Card", "Email"]
+    else:
+        cur.execute("SELECT name FROM products WHERE category=%s", (category,))
+        buttons = [r[0] for r in cur.fetchall()]
+        keyboard.add(InlineKeyboardButton(text="⬅️ Back", callback_data="services"))
+    for b in buttons:
+        keyboard.add(InlineKeyboardButton(text=b, callback_data=f"product_{b}_{category or ''}"))
+    conn.close()
+    return keyboard
+
+def confirm_keyboard(price, product_name):
     return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="⬅ Back", callback_data="back")]
+        [
+            InlineKeyboardButton(text=f"✅ Confirm (${price})", callback_data=f"confirm_{product_name}"),
+            InlineKeyboardButton(text="❌ Cancel", callback_data="cancel")
+        ]
     ])
 
 # ================= START ====================
 @dp.message(CommandStart())
 async def start(message: types.Message):
-    if not await check_subscription(message.from_user.id):
-        await message.answer(
-            "🔒 Please join our channel first",
-            reply_markup=join_keyboard()
-        )
+    # Check subscription
+    member = await bot.get_chat_member(chat_id=CHANNEL_ID, user_id=message.from_user.id)
+    if member.status == "left":
+        await message.answer(f"Please join our channel {CHANNEL_ID} to use the bot.")
         return
 
+    # Add user if not exists
     conn = get_db()
     cur = conn.cursor()
-    cur.execute("""
-        INSERT INTO users (user_id)
-        VALUES (%s)
-        ON CONFLICT (user_id) DO NOTHING
-    """, (message.from_user.id,))
-    cur.execute("SELECT lang FROM users WHERE user_id=%s", (message.from_user.id,))
-    lang = cur.fetchone()[0]
+    cur.execute("INSERT INTO users (user_id) VALUES (%s) ON CONFLICT DO NOTHING", (message.from_user.id,))
     conn.commit()
+    cur.execute("SELECT lang FROM users WHERE user_id=%s", (message.from_user.id,))
+    lang_row = cur.fetchone()
     conn.close()
-
-    if lang:
-        await message.answer("Main Menu", reply_markup=main_menu(lang))
+    if lang_row and lang_row[0]:
+        # Already selected language, show main menu
+        lang = lang_row[0]
+        await message.answer("Main Menu" if lang == "en" else "القائمة الرئيسية",
+                             reply_markup=main_menu(lang))
     else:
-        await message.answer("Choose language / اختر اللغة", reply_markup=lang_keyboard())
-
-# ================= JOIN CHECK ==============
-@dp.callback_query(lambda c: c.data == "check_join")
-async def recheck(call: types.CallbackQuery):
-    if await check_subscription(call.from_user.id):
-        await start(call.message)
-    else:
-        await call.answer("❌ You must join first", show_alert=True)
+        # Ask language
+        await message.answer("Choose language / اختر اللغة",
+                             reply_markup=lang_keyboard())
 
 # ================= LANGUAGE =================
 @dp.callback_query(lambda c: c.data.startswith("lang_"))
-async def set_lang(call: types.CallbackQuery):
+async def set_language(call: types.CallbackQuery):
     lang = call.data.split("_")[1]
     conn = get_db()
     cur = conn.cursor()
     cur.execute("UPDATE users SET lang=%s WHERE user_id=%s", (lang, call.from_user.id))
     conn.commit()
     conn.close()
-
-    await call.message.edit_text("Main Menu", reply_markup=main_menu(lang))
+    await call.message.edit_text(
+        "Main Menu" if lang == "en" else "القائمة الرئيسية",
+        reply_markup=main_menu(lang)
+    )
 
 # ================= SERVICES =================
-@dp.callback_query(lambda c: c.data == "services")
-async def services(call: types.CallbackQuery):
+@dp.callback_query(lambda c: c.data.startswith("product_"))
+async def select_product(call: types.CallbackQuery):
+    _, product_name, category = call.data.split("_", 2)
     conn = get_db()
     cur = conn.cursor()
-    cur.execute("SELECT name, price FROM services")
-    data = cur.fetchall()
+    cur.execute("SELECT message, price FROM products WHERE name=%s", (product_name,))
+    row = cur.fetchone()
     conn.close()
+    if row:
+        message_text, price = row
+        await call.message.answer(
+            f"Product: {product_name}\nPrice: ${price}\n\nDo you want to buy?",
+            reply_markup=confirm_keyboard(price, product_name)
+        )
 
-    if not data:
-        await call.message.edit_text("No services available", reply_markup=back_button())
-        return
-
-    kb = []
-    for name, price in data:
-        kb.append([InlineKeyboardButton(text=f"{name} — ${price}", callback_data=f"buy_{name}")])
-    kb.append([InlineKeyboardButton(text="⬅ Back", callback_data="back")])
-
-    await call.message.edit_text("🛒 Services", reply_markup=InlineKeyboardMarkup(inline_keyboard=kb))
-
-# ================= BUY =====================
-@dp.callback_query(lambda c: c.data.startswith("buy_"))
-async def buy(call: types.CallbackQuery):
-    service = call.data.replace("buy_", "")
+@dp.callback_query(lambda c: c.data.startswith("confirm_"))
+async def confirm_purchase(call: types.CallbackQuery):
+    product_name = call.data.split("_", 1)[1]
     conn = get_db()
     cur = conn.cursor()
-
-    cur.execute("SELECT price FROM services WHERE name=%s", (service,))
-    price = cur.fetchone()[0]
-
+    # Get product price
+    cur.execute("SELECT price FROM products WHERE name=%s", (product_name,))
+    row = cur.fetchone()
+    if not row:
+        await call.message.answer("Product not found!")
+        conn.close()
+        return
+    price = row[0]
+    # Check user balance
     cur.execute("SELECT balance FROM users WHERE user_id=%s", (call.from_user.id,))
     balance = cur.fetchone()[0]
-
     if balance < price:
-        await call.answer("❌ Not enough balance", show_alert=True)
+        await call.message.answer("❌ Not enough balance.")
+        conn.close()
         return
-
-    cur.execute("""
-        UPDATE users
-        SET balance = balance - %s,
-            total_spent = total_spent + %s
-        WHERE user_id=%s
-    """, (price, price, call.from_user.id))
-
+    # Deduct balance
+    cur.execute("UPDATE users SET balance=balance-%s, total_spent=total_spent+%s WHERE user_id=%s",
+                (price, price, call.from_user.id))
     conn.commit()
     conn.close()
+    await call.message.answer(f"✅ Purchase successful! ${price} deducted from your balance.")
 
-    await call.message.edit_text("✅ Purchase successful", reply_markup=back_button())
+@dp.callback_query(lambda c: c.data == "cancel")
+async def cancel_purchase(call: types.CallbackQuery):
+    await call.message.answer("❌ Purchase canceled.")
 
-# ================= BALANCE =================
-@dp.callback_query(lambda c: c.data == "balance")
-async def balance(call: types.CallbackQuery):
-    await call.message.edit_text(
-        "💳 Choose payment method",
-        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="Binance", callback_data="pay_Binance")],
-            [InlineKeyboardButton(text="CoinEX", callback_data="pay_CoinEX")],
-            [InlineKeyboardButton(text="Crypto", callback_data="pay_Crypto")],
-            [InlineKeyboardButton(text="⬅ Back", callback_data="back")]
-        ])
-    )
-
-@dp.callback_query(lambda c: c.data.startswith("pay_"))
-async def pay(call: types.CallbackQuery):
-    method = call.data.replace("pay_", "")
-    await call.message.edit_text(
-        f"Send amount for {method}",
-        reply_markup=back_button()
-    )
-
-@dp.message(lambda m: m.text and m.text.isdigit())
-async def topup(message: types.Message):
-    conn = get_db()
-    cur = conn.cursor()
-    cur.execute(
-        "INSERT INTO topups (user_id, amount, method) VALUES (%s, %s, 'manual')",
-        (message.from_user.id, int(message.text))
-    )
-    conn.commit()
-    conn.close()
-
-    await message.answer("✅ Top-up request sent")
-
-# ================= BACK ====================
-@dp.callback_query(lambda c: c.data == "back")
-async def back(call: types.CallbackQuery):
+# ================= SHOW SERVICES =================
+@dp.callback_query(lambda c: c.data == "services")
+async def show_services(call: types.CallbackQuery):
     conn = get_db()
     cur = conn.cursor()
     cur.execute("SELECT lang FROM users WHERE user_id=%s", (call.from_user.id,))
     lang = cur.fetchone()[0]
     conn.close()
-
-    await call.message.edit_text("Main Menu", reply_markup=main_menu(lang))
+    await call.message.edit_text(
+        "Choose service" if lang=="en" else "اختر الخدمة",
+        reply_markup=services_keyboard()
+    )
 
 # ================= RUN =====================
 async def main():
-    print("BOT RUNNING")
+    print("Bot started")
     await dp.start_polling(bot)
 
 if __name__ == "__main__":
