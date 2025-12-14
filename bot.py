@@ -1,13 +1,16 @@
 import asyncio
 import os
 import psycopg2
+import logging
 from aiogram import Bot, Dispatcher, types
 from aiogram.filters import CommandStart
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 
+# ================= LOGGING =================
+logging.basicConfig(level=logging.INFO)
+
 # ================= CONFIG =================
 BOT_TOKEN = "6872510077:AAFtVniM9OJRPDkjozI8hU52AvoDZ7njtsI"
-ADMIN_USERNAME = "MD18073"
 
 DATABASE_URL = os.getenv(
     "DATABASE_URL",
@@ -24,16 +27,15 @@ def get_db():
 def init_db():
     conn = get_db()
     cur = conn.cursor()
-    # Users table
+
     cur.execute("""
     CREATE TABLE IF NOT EXISTS users (
         user_id BIGINT PRIMARY KEY,
-        username TEXT,
         balance NUMERIC DEFAULT 0,
-        lang TEXT
+        lang TEXT DEFAULT 'en'
     )
     """)
-    # Services table
+
     cur.execute("""
     CREATE TABLE IF NOT EXISTS services (
         id SERIAL PRIMARY KEY,
@@ -41,7 +43,7 @@ def init_db():
         price NUMERIC NOT NULL
     )
     """)
-    # Top-ups table
+
     cur.execute("""
     CREATE TABLE IF NOT EXISTS topups (
         id SERIAL PRIMARY KEY,
@@ -50,6 +52,7 @@ def init_db():
         status TEXT DEFAULT 'pending'
     )
     """)
+
     conn.commit()
     conn.close()
 
@@ -77,21 +80,27 @@ def main_menu(lang):
 # ================= START ====================
 @dp.message(CommandStart())
 async def start(message: types.Message):
+    logging.info(f"/start from {message.from_user.id}")
+
     conn = get_db()
     cur = conn.cursor()
-    cur.execute("""
-    INSERT INTO users (user_id, username) VALUES (%s, %s)
-    ON CONFLICT (user_id) DO NOTHING
-    """, (message.from_user.id, message.from_user.username))
+    cur.execute(
+        "INSERT INTO users (user_id) VALUES (%s) ON CONFLICT (user_id) DO NOTHING",
+        (message.from_user.id,)
+    )
     conn.commit()
     conn.close()
 
-    await message.answer("Choose language / اختر اللغة", reply_markup=lang_keyboard())
+    await message.answer(
+        "Choose language / اختر اللغة",
+        reply_markup=lang_keyboard()
+    )
 
 # ================= LANGUAGE =================
 @dp.callback_query(lambda c: c.data.startswith("lang_"))
 async def set_language(call: types.CallbackQuery):
     lang = call.data.split("_")[1]
+
     conn = get_db()
     cur = conn.cursor()
     cur.execute("UPDATE users SET lang=%s WHERE user_id=%s", (lang, call.from_user.id))
@@ -108,20 +117,26 @@ async def set_language(call: types.CallbackQuery):
 async def show_services(call: types.CallbackQuery):
     conn = get_db()
     cur = conn.cursor()
+
     cur.execute("SELECT lang, balance FROM users WHERE user_id=%s", (call.from_user.id,))
-    lang, balance = cur.fetchone()
+    row = cur.fetchone()
+    if not row:
+        conn.close()
+        return
+
+    lang, balance = row
 
     cur.execute("SELECT name, price FROM services ORDER BY id")
     services = cur.fetchall()
     conn.close()
 
     if not services:
-        await call.message.answer("No services available" if lang=="en" else "لا توجد خدمات")
+        await call.message.answer("No services available" if lang == "en" else "لا توجد خدمات")
         return
 
-    text = "🛒 Services:\n\n" if lang=="en" else "🛒 الخدمات:\n\n"
-    for s in services:
-        text += f"{s[0]} — ${s[1]}\n"
+    text = "🛒 Services:\n\n" if lang == "en" else "🛒 الخدمات:\n\n"
+    for name, price in services:
+        text += f"{name} — ${price}\n"
 
     text += f"\n💰 Balance: ${balance}"
     await call.message.answer(text)
@@ -130,23 +145,28 @@ async def show_services(call: types.CallbackQuery):
 @dp.callback_query(lambda c: c.data == "topup")
 async def topup(call: types.CallbackQuery):
     await call.message.answer(
-        "Send amount like: 10\nAdmin will approve manually" 
+        "Send the amount as a number (example: 10)"
         if True else ""
     )
 
 @dp.message(lambda m: m.text and m.text.isdigit())
 async def create_topup(message: types.Message):
     amount = int(message.text)
+
     conn = get_db()
     cur = conn.cursor()
-    cur.execute("INSERT INTO topups (user_id, amount) VALUES (%s, %s)", (message.from_user.id, amount))
+    cur.execute(
+        "INSERT INTO topups (user_id, amount) VALUES (%s, %s)",
+        (message.from_user.id, amount)
+    )
     conn.commit()
     conn.close()
-    await message.answer("✅ Top-up request sent. Wait for admin approval.")
+
+    await message.answer("✅ Top-up request sent. Await admin approval.")
 
 # ================= RUN =====================
 async def main():
-    print("Bot started")
+    logging.info("Bot started successfully")
     await dp.start_polling(bot)
 
 if __name__ == "__main__":
