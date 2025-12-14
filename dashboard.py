@@ -23,16 +23,18 @@ def init_db():
     conn = get_db()
     cur = conn.cursor()
 
-    # USERS
+    # USERS TABLE
     cur.execute("""
     CREATE TABLE IF NOT EXISTS users (
         user_id BIGINT PRIMARY KEY,
         balance NUMERIC DEFAULT 0,
-        total_added NUMERIC DEFAULT 0,
-        total_spent NUMERIC DEFAULT 0,
         lang TEXT
     )
     """)
+
+    # ADD MISSING COLUMNS SAFELY
+    cur.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS total_added NUMERIC DEFAULT 0")
+    cur.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS total_spent NUMERIC DEFAULT 0")
 
     # SERVICES
     cur.execute("""
@@ -83,7 +85,6 @@ def dashboard():
     conn = get_db()
     cur = conn.cursor()
 
-    # USERS STATS
     cur.execute("""
         SELECT user_id, balance, total_added, total_spent
         FROM users
@@ -91,11 +92,9 @@ def dashboard():
     """)
     users = cur.fetchall()
 
-    # SERVICES
     cur.execute("SELECT * FROM services ORDER BY id DESC")
     services = cur.fetchall()
 
-    # TOPUPS
     cur.execute("""
         SELECT id, user_id, amount, method, status
         FROM topups
@@ -147,8 +146,7 @@ def dashboard():
     {% endfor %}
     </ul>
 
-    <br>
-    <a href="/logout">Logout</a>
+    <br><a href="/logout">Logout</a>
     """, users=users, services=services, topups=topups)
 
 # ================= ADD SERVICE ============
@@ -157,15 +155,14 @@ def add_service():
     if not session.get("admin"):
         return redirect("/")
 
-    name = request.form["name"]
-    price = request.form["price"]
-
     conn = get_db()
     cur = conn.cursor()
-    cur.execute("INSERT INTO services (name, price) VALUES (%s, %s)", (name, price))
+    cur.execute(
+        "INSERT INTO services (name, price) VALUES (%s, %s)",
+        (request.form["name"], request.form["price"])
+    )
     conn.commit()
     conn.close()
-
     return redirect("/dashboard")
 
 # ================= APPROVE TOPUP ==========
@@ -182,7 +179,6 @@ def approve(tid):
 
     if row:
         user_id, amount = row
-
         cur.execute("UPDATE topups SET status='approved' WHERE id=%s", (tid,))
         cur.execute("""
             UPDATE users
