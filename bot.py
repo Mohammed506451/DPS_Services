@@ -1,15 +1,17 @@
+import os
 import sqlite3
 from aiogram import Bot, Dispatcher, types
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.utils import executor
 
 API_TOKEN = "6872510077:AAFtVniM9OJRPDkjozI8hU52AvoDZ7njtsI"
-ADMIN_USERNAME = "MD18073"  # without @
+ADMIN_USERNAME = "MD18073"  # Without @
 
 bot = Bot(token=API_TOKEN)
 dp = Dispatcher(bot)
 
-DB = "botdata.db"
+# Use the same database as dashboard
+DB = os.path.join(os.getcwd(), "botdata.db")
 
 # ===============================
 # DATABASE HELPER
@@ -113,4 +115,5 @@ async def admin_panel(callback_query: types.CallbackQuery):
 # RUN BOT
 # ===============================
 if __name__ == "__main__":
+    from aiogram import executor
     executor.start_polling(dp, skip_updates=True)
