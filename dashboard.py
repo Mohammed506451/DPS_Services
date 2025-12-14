@@ -8,16 +8,10 @@ ADMIN_PASSWORD = "Mohammed@7756"
 
 DATABASE_URL = os.environ.get("DATABASE_URL")
 
-# ===============================
-# DATABASE HELPER
-# ===============================
 def get_db():
     conn = psycopg2.connect(DATABASE_URL, cursor_factory=RealDictCursor)
     return conn
 
-# ===============================
-# INIT DATABASE
-# ===============================
 def init_db():
     conn = get_db()
     cur = conn.cursor()
@@ -50,9 +44,6 @@ def init_db():
 
 init_db()
 
-# ===============================
-# LOGIN PAGE
-# ===============================
 @app.route("/", methods=["GET", "POST"])
 def login():
     if request.method == "POST":
@@ -68,9 +59,6 @@ def login():
     </form>
     """
 
-# ===============================
-# TOP-UP REQUESTS
-# ===============================
 @app.route("/topups")
 def topups():
     conn = get_db()
@@ -88,9 +76,6 @@ def topups():
     html += "</table><br><a href='/products'>Manage Services</a>"
     return html
 
-# ===============================
-# APPROVE / REJECT TOPUPS
-# ===============================
 @app.route("/approve/<int:rid>")
 def approve(rid):
     conn = get_db()
@@ -113,9 +98,6 @@ def reject(rid):
     conn.close()
     return redirect("/topups")
 
-# ===============================
-# SERVICES / PRODUCTS
-# ===============================
 @app.route("/products", methods=["GET", "POST"])
 def products():
     conn = get_db()
@@ -158,9 +140,6 @@ def delete(pid):
     conn.close()
     return redirect("/products")
 
-# ===============================
-# RUN SERVER
-# ===============================
 if __name__ == "__main__":
     from waitress import serve
     port = int(os.environ.get("PORT", 8080))
