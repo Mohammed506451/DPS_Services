@@ -7,7 +7,6 @@ from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 
 # ================= CONFIG =================
 BOT_TOKEN = "6872510077:AAFtVniM9OJRPDkjozI8hU52AvoDZ7njtsI"
-ADMIN_USERNAME = "MD18073"
 CHANNEL_USERNAME = "@Offerwallproxy"
 
 DATABASE_URL = os.getenv(
@@ -41,15 +40,6 @@ def init_db():
         status TEXT DEFAULT 'pending',
         method TEXT DEFAULT 'Unknown'
     )""")
-    # products table
-    cur.execute("""
-    CREATE TABLE IF NOT EXISTS products (
-        id SERIAL PRIMARY KEY,
-        category TEXT,
-        name TEXT,
-        price NUMERIC,
-        message TEXT
-    )""")
     conn.commit()
     conn.close()
 
@@ -76,6 +66,10 @@ def back_button(lang):
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="🔙 Back" if lang=="en" else "🔙 العودة", callback_data="back")]
     ])
+
+# ================= SESSION =================
+# Simple in-memory storage for current top-up method
+user_topup_method = {}
 
 # ================= START ====================
 @dp.message(CommandStart())
@@ -135,30 +129,23 @@ async def balance_menu(call):
 @dp.callback_query(lambda c: c.data.startswith("topup_"))
 async def topup_method(call):
     method = call.data.split("_")[1]
+    user_topup_method[call.from_user.id] = method
     await call.message.answer(f"Send amount to top-up via {method}:")
-    # Store the method temporarily in user session
-    conn = get_db()
-    cur = conn.cursor()
-    cur.execute("UPDATE users SET lang=lang WHERE user_id=%s", (call.from_user.id,))  # dummy update
-    conn.commit()
-    conn.close()
 
+# ================= CREATE TOPUP =================
 @dp.message(lambda m: m.text.isdigit())
 async def create_topup(message: types.Message):
     amount = int(message.text)
+    method = user_topup_method.get(message.from_user.id, "Unknown")
     conn = get_db()
     cur = conn.cursor()
-    cur.execute("SELECT user_id FROM users WHERE user_id=%s", (message.from_user.id,))
-    user = cur.fetchone()
-    if not user:
-        await message.answer("⚠️ You are not registered.")
-        conn.close()
-        return
     cur.execute("INSERT INTO topups (user_id, amount, method) VALUES (%s,%s,%s)",
-                (message.from_user.id, amount, "Unknown"))
+                (message.from_user.id, amount, method))
     conn.commit()
     conn.close()
-    await message.answer("✅ Top-up request sent. Wait for admin approval.")
+    await message.answer(f"✅ Top-up request of ${amount} via {method} sent. Wait for admin approval.")
+    # Clear the method after submission
+    user_topup_method.pop(message.from_user.id, None)
 
 # ================= BACK =================
 @dp.callback_query(lambda c: c.data == "back")
