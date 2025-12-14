@@ -15,7 +15,7 @@ SECRET_KEY = "super-secret-key"
 app = Flask(__name__)
 app.secret_key = SECRET_KEY
 
-# ================= DATABASE ===============
+# ================= DATABASE =================
 def get_db():
     return psycopg2.connect(DATABASE_URL, sslmode="require")
 
@@ -23,37 +23,41 @@ def init_db():
     conn = get_db()
     cur = conn.cursor()
 
-    # USERS TABLE
-    cur.execute("""
-    CREATE TABLE IF NOT EXISTS users (
-        user_id BIGINT PRIMARY KEY,
-        balance NUMERIC DEFAULT 0,
-        lang TEXT
-    )
-    """)
-    cur.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS total_added NUMERIC DEFAULT 0")
-    cur.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS total_spent NUMERIC DEFAULT 0")
-
-    # SERVICES TABLE
     cur.execute("""
     CREATE TABLE IF NOT EXISTS services (
         id SERIAL PRIMARY KEY,
-        name TEXT NOT NULL,
-        price NUMERIC NOT NULL
+        name TEXT NOT NULL
     )
     """)
 
-    # TOPUPS TABLE
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS products (
+        id SERIAL PRIMARY KEY,
+        category TEXT,
+        name TEXT,
+        message TEXT,
+        price NUMERIC
+    )
+    """)
+
     cur.execute("""
     CREATE TABLE IF NOT EXISTS topups (
         id SERIAL PRIMARY KEY,
         user_id BIGINT,
         amount NUMERIC,
-        status TEXT DEFAULT 'pending'
+        status TEXT DEFAULT 'pending',
+        method TEXT
     )
     """)
-    # Add method column if missing
-    cur.execute("ALTER TABLE topups ADD COLUMN IF NOT EXISTS method TEXT")
+
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS users (
+        user_id BIGINT PRIMARY KEY,
+        balance NUMERIC DEFAULT 0,
+        total_added NUMERIC DEFAULT 0,
+        total_spent NUMERIC DEFAULT 0
+    )
+    """)
 
     conn.commit()
     conn.close()
@@ -75,31 +79,28 @@ def login():
     </form>
     """)
 
-# ================= DASHBOARD ==============
+# ================= DASHBOARD ==================
 @app.route("/dashboard")
 def dashboard():
     if not session.get("admin"):
         return redirect("/")
 
-    try:
-        conn = get_db()
-        cur = conn.cursor()
+    conn = get_db()
+    cur = conn.cursor()
 
-        # USERS
-        cur.execute("SELECT user_id, balance, total_added, total_spent FROM users ORDER BY user_id DESC")
-        users = cur.fetchall()
+    cur.execute("SELECT * FROM services ORDER BY id DESC")
+    services = cur.fetchall()
 
-        # SERVICES
-        cur.execute("SELECT * FROM services ORDER BY id DESC")
-        services = cur.fetchall()
+    cur.execute("SELECT * FROM products ORDER BY id DESC")
+    products = cur.fetchall()
 
-        # TOPUPS
-        cur.execute("SELECT id, user_id, amount, method, status FROM topups ORDER BY id DESC")
-        topups = cur.fetchall()
+    cur.execute("SELECT * FROM topups ORDER BY id DESC")
+    topups = cur.fetchall()
 
-        conn.close()
-    except Exception as e:
-        return f"ERROR: {e}"
+    cur.execute("SELECT * FROM users ORDER BY user_id DESC")
+    users = cur.fetchall()
+
+    conn.close()
 
     return render_template_string("""
     <h1>Admin Dashboard</h1>
@@ -107,113 +108,137 @@ def dashboard():
     <h2>Add Service</h2>
     <form method="post" action="/add_service">
         <input name="name" placeholder="Service name" required>
-        <input name="price" type="number" step="0.01" placeholder="Price" required>
         <button>Add</button>
     </form>
 
-    <h2>Services</h2>
+    <h2>Delete Service</h2>
+    <form method="post" action="/delete_service">
+        <select name="service_id" required>
+        {% for s in services %}
+            <option value="{{ s[0] }}">{{ s[1] }}</option>
+        {% endfor %}
+        </select>
+        <button>Delete</button>
+    </form>
+
+    <h2>Add Product</h2>
+    <form method="post" action="/add_product">
+        <input name="category" placeholder="Category (Top-level)" required>
+        <input name="name" placeholder="Product name" required>
+        <input name="price" placeholder="Price" type="number" step="0.01" required>
+        <textarea name="message" placeholder="Message to send user" required></textarea>
+        <button>Add</button>
+    </form>
+
+    <h2>Products</h2>
     <ul>
-    {% for s in services %}
-        <li>{{ s[1] }} — ${{ s[2] }}</li>
-    {% endfor %}
+        {% for p in products %}
+        <li>{{ p[2] }} ({{ p[1] }}) - ${{ p[4] }}</li>
+        {% endfor %}
     </ul>
 
     <h2>Top-up Requests</h2>
     <ul>
-    {% for t in topups %}
+        {% for t in topups %}
         <li>
-            User {{ t[1] }} | ${{ t[2] }} | {{ t[3] }} | {{ t[4] }}
+            User {{ t[1] }} — ${{ t[2] }} — {{ t[4] }}
             {% if t[4] == 'pending' %}
-                <a href="/approve/{{ t[0] }}">Approve</a> |
-                <a href="/reject/{{ t[0] }}">Reject</a>
+            <a href="/approve/{{ t[0] }}">Approve</a> |
+            <a href="/reject/{{ t[0] }}">Reject</a>
             {% endif %}
         </li>
-    {% endfor %}
+        {% endfor %}
     </ul>
 
-    <h2>User Statistics</h2>
-    <ul>
-    {% for u in users %}
-        <li>
-            User {{ u[0] }} |
-            Balance: ${{ u[1] }} |
-            Added: ${{ u[2] }} |
-            Spent: ${{ u[3] }}
-        </li>
-    {% endfor %}
-    </ul>
+    <h2>Users Statistics</h2>
+    <table border="1" cellpadding="5">
+        <tr><th>User ID</th><th>Balance</th><th>Total Added</th><th>Total Spent</th></tr>
+        {% for u in users %}
+        <tr>
+            <td>{{ u[0] }}</td>
+            <td>{{ u[1] }}</td>
+            <td>{{ u[2] }}</td>
+            <td>{{ u[3] }}</td>
+        </tr>
+        {% endfor %}
+    </table>
 
     <br><a href="/logout">Logout</a>
-    """, users=users, services=services, topups=topups)
+    """, services=services, products=products, topups=topups, users=users)
 
-# ================= ADD SERVICE ============
+# ================= ADD / DELETE SERVICE ==================
 @app.route("/add_service", methods=["POST"])
 def add_service():
     if not session.get("admin"):
         return redirect("/")
-
-    try:
-        conn = get_db()
-        cur = conn.cursor()
-        cur.execute(
-            "INSERT INTO services (name, price) VALUES (%s, %s)",
-            (request.form["name"], request.form["price"])
-        )
-        conn.commit()
-        conn.close()
-    except Exception as e:
-        return f"ERROR: {e}"
+    name = request.form["name"]
+    conn = get_db()
+    cur = conn.cursor()
+    cur.execute("INSERT INTO services (name) VALUES (%s)", (name,))
+    conn.commit()
+    conn.close()
     return redirect("/dashboard")
 
-# ================= APPROVE TOPUP ==========
+@app.route("/delete_service", methods=["POST"])
+def delete_service():
+    if not session.get("admin"):
+        return redirect("/")
+    service_id = request.form["service_id"]
+    conn = get_db()
+    cur = conn.cursor()
+    cur.execute("DELETE FROM services WHERE id=%s", (service_id,))
+    conn.commit()
+    conn.close()
+    return redirect("/dashboard")
+
+# ================= ADD PRODUCT ==================
+@app.route("/add_product", methods=["POST"])
+def add_product():
+    if not session.get("admin"):
+        return redirect("/")
+    category = request.form["category"]
+    name = request.form["name"]
+    message = request.form["message"]
+    price = request.form["price"]
+    conn = get_db()
+    cur = conn.cursor()
+    cur.execute("INSERT INTO products (category, name, message, price) VALUES (%s,%s,%s,%s)",
+                (category, name, message, price))
+    conn.commit()
+    conn.close()
+    return redirect("/dashboard")
+
+# ================= TOPUP ACTIONS ==================
 @app.route("/approve/<int:tid>")
 def approve(tid):
-    if not session.get("admin"):
-        return redirect("/")
-
-    try:
-        conn = get_db()
-        cur = conn.cursor()
-        cur.execute("SELECT user_id, amount FROM topups WHERE id=%s", (tid,))
-        row = cur.fetchone()
-        if row:
-            user_id, amount = row
-            cur.execute("UPDATE topups SET status='approved' WHERE id=%s", (tid,))
-            cur.execute("""
-                UPDATE users
-                SET balance = balance + %s,
-                    total_added = total_added + %s
-                WHERE user_id=%s
-            """, (amount, amount, user_id))
-        conn.commit()
-        conn.close()
-    except Exception as e:
-        return f"ERROR: {e}"
+    conn = get_db()
+    cur = conn.cursor()
+    cur.execute("UPDATE topups SET status='approved' WHERE id=%s RETURNING user_id, amount", (tid,))
+    row = cur.fetchone()
+    if row:
+        user_id, amount = row
+        # update user balance
+        cur.execute("UPDATE users SET balance=balance+%s, total_added=total_added+%s WHERE user_id=%s",
+                    (amount, amount, user_id))
+    conn.commit()
+    conn.close()
     return redirect("/dashboard")
 
-# ================= REJECT TOPUP ===========
 @app.route("/reject/<int:tid>")
 def reject(tid):
-    if not session.get("admin"):
-        return redirect("/")
-
-    try:
-        conn = get_db()
-        cur = conn.cursor()
-        cur.execute("UPDATE topups SET status='rejected' WHERE id=%s", (tid,))
-        conn.commit()
-        conn.close()
-    except Exception as e:
-        return f"ERROR: {e}"
+    conn = get_db()
+    cur = conn.cursor()
+    cur.execute("UPDATE topups SET status='rejected' WHERE id=%s", (tid,))
+    conn.commit()
+    conn.close()
     return redirect("/dashboard")
 
-# ================= LOGOUT =================
+# ================= LOGOUT ==================
 @app.route("/logout")
 def logout():
     session.clear()
     return redirect("/")
 
-# ================= RUN ====================
+# ================= RUN ==================
 if __name__ == "__main__":
-    PORT = int(os.environ.get("PORT", 8080))
-    app.run(host="0.0.0.0", port=PORT)
+    app.run(host="0.0.0.0", port=int(os.getenv("PORT", 5000)))
