@@ -1,96 +1,154 @@
-import time
+import asyncio
+import os
 import psycopg2
-from psycopg2.extras import RealDictCursor
 from aiogram import Bot, Dispatcher, types
+from aiogram.filters import CommandStart
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
-from aiogram.utils import executor
 
-# ===== CONFIGURATION =====
-API_TOKEN = "6872510077:AAFtVniM9OJRPDkjozI8hU52AvoDZ7njtsI"
+# ================= CONFIG =================
+BOT_TOKEN = "6872510077:AAFtVniM9OJRPDkjozI8hU52AvoDZ7njtsI"
 ADMIN_USERNAME = "MD18073"
-DATABASE_URL = "postgresql://postgres:wTWqoVJnKEDRtDDWFlpJNfSGGRdYCJHB@nozomi.proxy.rlwy.net:22169/railway"
 
-bot = Bot(token=API_TOKEN)
-dp = Dispatcher(bot)
+DATABASE_URL = os.getenv(
+    "DATABASE_URL",
+    "postgresql://postgres:wTWqoVJnKEDRtDDWFlpJNfSGGRdYCJHB@nozomi.proxy.rlwy.net:22169/railway"
+)
 
-# ===== SAFE DATABASE CONNECTION WITH RETRIES =====
+bot = Bot(token=BOT_TOKEN)
+dp = Dispatcher()
+
+# ================= DATABASE =================
 def get_db():
-    for i in range(5):
-        try:
-            conn = psycopg2.connect(DATABASE_URL, cursor_factory=RealDictCursor)
-            return conn
-        except Exception as e:
-            print("DB connection failed, retrying in 3 seconds...", e)
-            time.sleep(3)
-    raise Exception("Cannot connect to database after multiple retries")
+    return psycopg2.connect(DATABASE_URL, sslmode="require")
 
-# ===== START COMMAND =====
-@dp.message_handler(commands=["start"])
-async def start(message: types.Message):
-    keyboard = InlineKeyboardMarkup()
-    keyboard.add(
-        InlineKeyboardButton("🇱🇧 Arabic", callback_data="lang_ar"),
-        InlineKeyboardButton("🇺🇸 English", callback_data="lang_en")
+def init_db():
+    conn = get_db()
+    cur = conn.cursor()
+
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS users (
+        user_id BIGINT PRIMARY KEY,
+        balance NUMERIC DEFAULT 0,
+        lang TEXT
     )
-    await message.reply("Choose your language / اختر لغتك", reply_markup=keyboard)
+    """)
 
-# ===== LANGUAGE SELECTION =====
-@dp.callback_query_handler(lambda c: c.data.startswith("lang_"))
-async def choose_language(callback_query: types.CallbackQuery):
-    lang = callback_query.data.split("_")[1]
-    keyboard = InlineKeyboardMarkup()
-    if callback_query.from_user.username == ADMIN_USERNAME:
-        keyboard.add(InlineKeyboardButton("Admin Panel", callback_data="admin_panel"))
-    keyboard.add(InlineKeyboardButton("Show Services", callback_data="show_services"))
-    await bot.send_message(callback_query.from_user.id, "Main menu:", reply_markup=keyboard)
-    await callback_query.answer()
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS topups (
+        id SERIAL PRIMARY KEY,
+        user_id BIGINT,
+        amount NUMERIC,
+        status TEXT DEFAULT 'pending'
+    )
+    """)
 
-# ===== SERVICES =====
-def get_services_keyboard():
-    db = get_db()
-    cur = db.cursor()
-    cur.execute("CREATE TABLE IF NOT EXISTS products (id SERIAL PRIMARY KEY, name TEXT, price REAL);")
-    cur.execute("SELECT * FROM products")
-    rows = cur.fetchall()
-    db.close()
-    buttons = []
-    for r in rows:
-        buttons.append([InlineKeyboardButton(f"{r['name']} - ${r['price']}", callback_data=f"buy_{r['id']}")])
-    return InlineKeyboardMarkup(buttons)
+    conn.commit()
+    conn.close()
 
-@dp.callback_query_handler(lambda c: c.data == "show_services")
-async def show_services(callback_query: types.CallbackQuery):
-    keyboard = get_services_keyboard()
-    if not keyboard.inline_keyboard:
-        await bot.send_message(callback_query.from_user.id, "No services available currently.")
+init_db()
+
+# ================= KEYBOARDS =================
+def lang_keyboard():
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="🇱🇧 العربية", callback_data="lang_ar")],
+        [InlineKeyboardButton(text="🇺🇸 English", callback_data="lang_en")]
+    ])
+
+def main_menu(lang):
+    if lang == "ar":
+        return InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="🛒 الخدمات", callback_data="services")],
+            [InlineKeyboardButton(text="💰 شحن الرصيد", callback_data="topup")]
+        ])
     else:
-        await bot.send_message(callback_query.from_user.id, "Choose a service:", reply_markup=keyboard)
-    await callback_query.answer()
+        return InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="🛒 Services", callback_data="services")],
+            [InlineKeyboardButton(text="💰 Top up balance", callback_data="topup")]
+        ])
 
-# ===== BUY SERVICE =====
-@dp.callback_query_handler(lambda c: c.data.startswith("buy_"))
-async def buy_service(callback_query: types.CallbackQuery):
-    service_id = int(callback_query.data.split("_")[1])
-    db = get_db()
-    cur = db.cursor()
-    cur.execute("SELECT * FROM products WHERE id=%s", (service_id,))
-    service = cur.fetchone()
-    db.close()
-    if service:
-        await bot.send_message(callback_query.from_user.id, f"You selected: {service['name']} - ${service['price']}")
-    else:
-        await bot.send_message(callback_query.from_user.id, "Service not found.")
-    await callback_query.answer()
+# ================= START ====================
+@dp.message(CommandStart())
+async def start(message: types.Message):
+    conn = get_db()
+    cur = conn.cursor()
+    cur.execute("INSERT INTO users (user_id) VALUES (%s) ON CONFLICT DO NOTHING", (message.from_user.id,))
+    conn.commit()
+    conn.close()
 
-# ===== ADMIN PANEL =====
-@dp.callback_query_handler(lambda c: c.data == "admin_panel")
-async def admin_panel(callback_query: types.CallbackQuery):
-    if callback_query.from_user.username == ADMIN_USERNAME:
-        await bot.send_message(callback_query.from_user.id, "Admin panel coming soon!")
-    else:
-        await bot.send_message(callback_query.from_user.id, "❌ You are not an admin.")
-    await callback_query.answer()
+    await message.answer(
+        "Choose language / اختر اللغة",
+        reply_markup=lang_keyboard()
+    )
 
-# ===== RUN BOT =====
+# ================= LANGUAGE =================
+@dp.callback_query(lambda c: c.data.startswith("lang_"))
+async def set_language(call: types.CallbackQuery):
+    lang = call.data.split("_")[1]
+
+    conn = get_db()
+    cur = conn.cursor()
+    cur.execute("UPDATE users SET lang=%s WHERE user_id=%s", (lang, call.from_user.id))
+    conn.commit()
+    conn.close()
+
+    await call.message.edit_text(
+        "Main Menu" if lang == "en" else "القائمة الرئيسية",
+        reply_markup=main_menu(lang)
+    )
+
+# ================= SERVICES =================
+@dp.callback_query(lambda c: c.data == "services")
+async def show_services(call: types.CallbackQuery):
+    conn = get_db()
+    cur = conn.cursor()
+
+    cur.execute("SELECT lang, balance FROM users WHERE user_id=%s", (call.from_user.id,))
+    lang, balance = cur.fetchone()
+
+    cur.execute("SELECT name, price FROM services ORDER BY id")
+    services = cur.fetchall()
+
+    conn.close()
+
+    if not services:
+        await call.message.answer("No services available")
+        return
+
+    text = "🛒 Services:\n\n" if lang == "en" else "🛒 الخدمات:\n\n"
+    for s in services:
+        text += f"{s[0]} — ${s[1]}\n"
+
+    text += f"\n💰 Balance: ${balance}"
+
+    await call.message.answer(text)
+
+# ================= TOPUP ====================
+@dp.callback_query(lambda c: c.data == "topup")
+async def topup(call: types.CallbackQuery):
+    await call.message.answer(
+        "Send amount like: 10\nAdmin will approve manually"
+        if True else ""
+    )
+
+@dp.message(lambda m: m.text and m.text.isdigit())
+async def create_topup(message: types.Message):
+    amount = int(message.text)
+
+    conn = get_db()
+    cur = conn.cursor()
+    cur.execute(
+        "INSERT INTO topups (user_id, amount) VALUES (%s, %s)",
+        (message.from_user.id, amount)
+    )
+    conn.commit()
+    conn.close()
+
+    await message.answer("✅ Top-up request sent. Wait for admin approval.")
+
+# ================= RUN =====================
+async def main():
+    print("Bot started")
+    await dp.start_polling(bot)
+
 if __name__ == "__main__":
-    executor.start_polling(dp, skip_updates=True)
+    asyncio.run(main())
