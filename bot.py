@@ -4,9 +4,12 @@ import psycopg2
 from aiogram import Bot, Dispatcher, types
 from aiogram.filters import CommandStart
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+from aiogram.exceptions import TelegramBadRequest
 
 # ================= CONFIG =================
 BOT_TOKEN = "6872510077:AAFtVniM9OJRPDkjozI8hU52AvoDZ7njtsI"
+ADMIN_USERNAME = "MD18073"
+
 CHANNEL_USERNAME = "@Offerwallproxy"
 
 DATABASE_URL = os.getenv(
@@ -36,6 +39,14 @@ def init_db():
     """)
 
     cur.execute("""
+    CREATE TABLE IF NOT EXISTS services (
+        id SERIAL PRIMARY KEY,
+        name TEXT,
+        price NUMERIC
+    )
+    """)
+
+    cur.execute("""
     CREATE TABLE IF NOT EXISTS topups (
         id SERIAL PRIMARY KEY,
         user_id BIGINT,
@@ -51,62 +62,69 @@ def init_db():
 init_db()
 
 # ================= HELPERS =================
-async def is_subscribed(user_id):
+async def check_subscription(user_id):
     try:
         member = await bot.get_chat_member(CHANNEL_USERNAME, user_id)
         return member.status in ["member", "administrator", "creator"]
-    except:
+    except TelegramBadRequest:
         return False
 
-def join_channel_button():
+def join_keyboard():
     return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(
-            text="🔔 Join Channel",
-            url=f"https://t.me/{CHANNEL_USERNAME.replace('@','')}"
-        )],
-        [InlineKeyboardButton(text="✅ I've Joined", callback_data="check_sub")]
+        [InlineKeyboardButton(text="✅ Join Channel", url=f"https://t.me/{CHANNEL_USERNAME.replace('@','')}")],
+        [InlineKeyboardButton(text="🔄 Check", callback_data="check_join")]
+    ])
+
+def lang_keyboard():
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="🇱🇧 العربية", callback_data="lang_ar")],
+        [InlineKeyboardButton(text="🇺🇸 English", callback_data="lang_en")]
     ])
 
 def main_menu(lang):
+    text = "🛒 Services" if lang == "en" else "🛒 الخدمات"
+    bal = "💰 Balance" if lang == "en" else "💰 الرصيد"
     return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton("🛒 Services", callback_data="services")],
-        [InlineKeyboardButton("💰 Balance", callback_data="balance")]
+        [InlineKeyboardButton(text=text, callback_data="services")],
+        [InlineKeyboardButton(text=bal, callback_data="balance")]
     ])
 
-# ================= START =================
+def back_button():
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="⬅ Back", callback_data="back")]
+    ])
+
+# ================= START ====================
 @dp.message(CommandStart())
 async def start(message: types.Message):
-    if not await is_subscribed(message.from_user.id):
+    if not await check_subscription(message.from_user.id):
         await message.answer(
-            "🔒 Please join our channel to use the bot",
-            reply_markup=join_channel_button()
+            "🔒 Please join our channel first",
+            reply_markup=join_keyboard()
         )
         return
 
     conn = get_db()
     cur = conn.cursor()
-    cur.execute(
-        "INSERT INTO users (user_id) VALUES (%s) ON CONFLICT DO NOTHING",
-        (message.from_user.id,)
-    )
+    cur.execute("""
+        INSERT INTO users (user_id)
+        VALUES (%s)
+        ON CONFLICT (user_id) DO NOTHING
+    """, (message.from_user.id,))
     cur.execute("SELECT lang FROM users WHERE user_id=%s", (message.from_user.id,))
     lang = cur.fetchone()[0]
+    conn.commit()
     conn.close()
 
     if lang:
         await message.answer("Main Menu", reply_markup=main_menu(lang))
     else:
-        await message.answer(
-            "Choose language",
-            reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-                [InlineKeyboardButton("🇺🇸 English", callback_data="lang_en")],
-                [InlineKeyboardButton("🇸🇦 العربية", callback_data="lang_ar")]
-            ])
-        )
+        await message.answer("Choose language / اختر اللغة", reply_markup=lang_keyboard())
 
-@dp.callback_query(lambda c: c.data == "check_sub")
-async def check_sub(call: types.CallbackQuery):
-    if await is_subscribed(call.from_user.id):
+# ================= JOIN CHECK ==============
+@dp.callback_query(lambda c: c.data == "check_join")
+async def recheck(call: types.CallbackQuery):
+    if await check_subscription(call.from_user.id):
         await start(call.message)
     else:
         await call.answer("❌ You must join first", show_alert=True)
@@ -115,7 +133,6 @@ async def check_sub(call: types.CallbackQuery):
 @dp.callback_query(lambda c: c.data.startswith("lang_"))
 async def set_lang(call: types.CallbackQuery):
     lang = call.data.split("_")[1]
-
     conn = get_db()
     cur = conn.cursor()
     cur.execute("UPDATE users SET lang=%s WHERE user_id=%s", (lang, call.from_user.id))
@@ -129,31 +146,29 @@ async def set_lang(call: types.CallbackQuery):
 async def services(call: types.CallbackQuery):
     conn = get_db()
     cur = conn.cursor()
-    cur.execute("SELECT id, name, price FROM services")
-    services = cur.fetchall()
+    cur.execute("SELECT name, price FROM services")
+    data = cur.fetchall()
     conn.close()
 
-    if not services:
-        await call.message.edit_text("No services available", reply_markup=main_menu("en"))
+    if not data:
+        await call.message.edit_text("No services available", reply_markup=back_button())
         return
 
-    keyboard = [
-        [InlineKeyboardButton(f"{s[1]} - ${s[2]}", callback_data=f"buy_{s[0]}")]
-        for s in services
-    ]
-    keyboard.append([InlineKeyboardButton("🔙 Back", callback_data="back")])
+    kb = []
+    for name, price in data:
+        kb.append([InlineKeyboardButton(text=f"{name} — ${price}", callback_data=f"buy_{name}")])
+    kb.append([InlineKeyboardButton(text="⬅ Back", callback_data="back")])
 
-    await call.message.edit_text("Choose service:", reply_markup=InlineKeyboardMarkup(inline_keyboard=keyboard))
+    await call.message.edit_text("🛒 Services", reply_markup=InlineKeyboardMarkup(inline_keyboard=kb))
 
-# ================= BUY =================
+# ================= BUY =====================
 @dp.callback_query(lambda c: c.data.startswith("buy_"))
 async def buy(call: types.CallbackQuery):
-    sid = int(call.data.split("_")[1])
-
+    service = call.data.replace("buy_", "")
     conn = get_db()
     cur = conn.cursor()
 
-    cur.execute("SELECT price FROM services WHERE id=%s", (sid,))
+    cur.execute("SELECT price FROM services WHERE name=%s", (service,))
     price = cur.fetchone()[0]
 
     cur.execute("SELECT balance FROM users WHERE user_id=%s", (call.from_user.id,))
@@ -161,11 +176,10 @@ async def buy(call: types.CallbackQuery):
 
     if balance < price:
         await call.answer("❌ Not enough balance", show_alert=True)
-        conn.close()
         return
 
     cur.execute("""
-        UPDATE users 
+        UPDATE users
         SET balance = balance - %s,
             total_spent = total_spent + %s
         WHERE user_id=%s
@@ -174,63 +188,56 @@ async def buy(call: types.CallbackQuery):
     conn.commit()
     conn.close()
 
-    await call.answer("✅ Purchase successful", show_alert=True)
+    await call.message.edit_text("✅ Purchase successful", reply_markup=back_button())
 
 # ================= BALANCE =================
 @dp.callback_query(lambda c: c.data == "balance")
 async def balance(call: types.CallbackQuery):
-    conn = get_db()
-    cur = conn.cursor()
-    cur.execute("SELECT balance FROM users WHERE user_id=%s", (call.from_user.id,))
-    bal = cur.fetchone()[0]
-    conn.close()
-
     await call.message.edit_text(
-        f"💰 Balance: ${bal}\nChoose payment method:",
+        "💳 Choose payment method",
         reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton("Binance", callback_data="topup_Binance")],
-            [InlineKeyboardButton("CoinEX", callback_data="topup_CoinEX")],
-            [InlineKeyboardButton("Crypto", callback_data="topup_Crypto")],
-            [InlineKeyboardButton("🔙 Back", callback_data="back")]
+            [InlineKeyboardButton(text="Binance", callback_data="pay_Binance")],
+            [InlineKeyboardButton(text="CoinEX", callback_data="pay_CoinEX")],
+            [InlineKeyboardButton(text="Crypto", callback_data="pay_Crypto")],
+            [InlineKeyboardButton(text="⬅ Back", callback_data="back")]
         ])
     )
 
-# ================= TOPUP =================
-@dp.callback_query(lambda c: c.data.startswith("topup_"))
-async def topup(call: types.CallbackQuery):
-    method = call.data.split("_")[1]
+@dp.callback_query(lambda c: c.data.startswith("pay_"))
+async def pay(call: types.CallbackQuery):
+    method = call.data.replace("pay_", "")
     await call.message.edit_text(
-        f"Send amount for {method} top-up (numbers only)",
-        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton("🔙 Back", callback_data="back")]
-        ])
+        f"Send amount for {method}",
+        reply_markup=back_button()
     )
-    dp.message.register(lambda m: process_topup(m, method))
 
-async def process_topup(message: types.Message, method):
-    if not message.text.isdigit():
-        return
-
-    amount = int(message.text)
-
+@dp.message(lambda m: m.text and m.text.isdigit())
+async def topup(message: types.Message):
     conn = get_db()
     cur = conn.cursor()
     cur.execute(
-        "INSERT INTO topups (user_id, amount, method) VALUES (%s, %s, %s)",
-        (message.from_user.id, amount, method)
+        "INSERT INTO topups (user_id, amount, method) VALUES (%s, %s, 'manual')",
+        (message.from_user.id, int(message.text))
     )
     conn.commit()
     conn.close()
 
-    await message.answer("✅ Top-up request sent. Await approval.")
+    await message.answer("✅ Top-up request sent")
 
-# ================= BACK =================
+# ================= BACK ====================
 @dp.callback_query(lambda c: c.data == "back")
 async def back(call: types.CallbackQuery):
-    await call.message.edit_text("Main Menu", reply_markup=main_menu("en"))
+    conn = get_db()
+    cur = conn.cursor()
+    cur.execute("SELECT lang FROM users WHERE user_id=%s", (call.from_user.id,))
+    lang = cur.fetchone()[0]
+    conn.close()
 
-# ================= RUN =================
+    await call.message.edit_text("Main Menu", reply_markup=main_menu(lang))
+
+# ================= RUN =====================
 async def main():
+    print("BOT RUNNING")
     await dp.start_polling(bot)
 
 if __name__ == "__main__":
