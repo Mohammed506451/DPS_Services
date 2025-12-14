@@ -1,13 +1,12 @@
 import os
 import psycopg2
-from flask import Flask, request, redirect, url_for, session, render_template_string
+from flask import Flask, request, redirect, session, render_template_string
 
 # ================= CONFIG =================
 DATABASE_URL = os.getenv(
     "DATABASE_URL",
     "postgresql://postgres:wTWqoVJnKEDRtDDWFlpJNfSGGRdYCJHB@nozomi.proxy.rlwy.net:22169/railway"
 )
-
 ADMIN_PASSWORD = "Mohammed@7756"
 SECRET_KEY = "super-secret-key"
 
@@ -22,7 +21,7 @@ def get_db():
 def init_db():
     conn = get_db()
     cur = conn.cursor()
-
+    # Services
     cur.execute("""
     CREATE TABLE IF NOT EXISTS services (
         id SERIAL PRIMARY KEY,
@@ -30,7 +29,16 @@ def init_db():
         price NUMERIC NOT NULL
     )
     """)
-
+    # Users
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS users (
+        user_id BIGINT PRIMARY KEY,
+        username TEXT,
+        balance NUMERIC DEFAULT 0,
+        lang TEXT
+    )
+    """)
+    # Top-ups
     cur.execute("""
     CREATE TABLE IF NOT EXISTS topups (
         id SERIAL PRIMARY KEY,
@@ -39,16 +47,15 @@ def init_db():
         status TEXT DEFAULT 'pending'
     )
     """)
-
     conn.commit()
     conn.close()
 
 init_db()
 
 # ================= LOGIN ==================
-@app.route("/", methods=["GET", "POST"])
+@app.route("/", methods=["GET","POST"])
 def login():
-    if request.method == "POST":
+    if request.method=="POST":
         if request.form.get("password") == ADMIN_PASSWORD:
             session["admin"] = True
             return redirect("/dashboard")
@@ -56,11 +63,11 @@ def login():
     <h2>Admin Login</h2>
     <form method="post">
         <input type="password" name="password" placeholder="Password" required>
-        <button type="submit">Login</button>
+        <button>Login</button>
     </form>
     """)
 
-# ================= DASHBOARD ==============
+# ================= DASHBOARD ==================
 @app.route("/dashboard")
 def dashboard():
     if not session.get("admin"):
@@ -68,13 +75,12 @@ def dashboard():
 
     conn = get_db()
     cur = conn.cursor()
-
     cur.execute("SELECT * FROM services ORDER BY id DESC")
     services = cur.fetchall()
-
     cur.execute("SELECT * FROM topups ORDER BY id DESC")
     topups = cur.fetchall()
-
+    cur.execute("SELECT * FROM users ORDER BY user_id")
+    users = cur.fetchall()
     conn.close()
 
     return render_template_string("""
@@ -107,32 +113,44 @@ def dashboard():
         {% endfor %}
     </ul>
 
-    <br><a href="/logout">Logout</a>
-    """, services=services, topups=topups)
+    <h2>Users</h2>
+    <ul>
+        {% for u in users %}
+        <li>{{ u[1] }} — Balance: ${{ u[2] }} — Lang: {{ u[3] }}</li>
+        {% endfor %}
+    </ul>
 
-# ================= ADD SERVICE ============
+    <br><a href="/logout">Logout</a>
+    """, services=services, topups=topups, users=users)
+
+# ================= ADD SERVICE ==================
 @app.route("/add_service", methods=["POST"])
 def add_service():
     if not session.get("admin"):
         return redirect("/")
-
     name = request.form["name"]
     price = request.form["price"]
-
     conn = get_db()
     cur = conn.cursor()
     cur.execute("INSERT INTO services (name, price) VALUES (%s, %s)", (name, price))
     conn.commit()
     conn.close()
-
     return redirect("/dashboard")
 
-# ================= TOPUP ACTIONS ==========
+# ================= TOPUP ACTIONS ==================
 @app.route("/approve/<int:tid>")
 def approve(tid):
     conn = get_db()
     cur = conn.cursor()
-    cur.execute("UPDATE topups SET status='approved' WHERE id=%s", (tid,))
+    # Get topup
+    cur.execute("SELECT user_id, amount FROM topups WHERE id=%s", (tid,))
+    row = cur.fetchone()
+    if row:
+        user_id, amount = row
+        # Approve topup
+        cur.execute("UPDATE topups SET status='approved' WHERE id=%s", (tid,))
+        # Add balance to user
+        cur.execute("UPDATE users SET balance = balance + %s WHERE user_id=%s", (amount, user_id))
     conn.commit()
     conn.close()
     return redirect("/dashboard")
@@ -153,5 +171,5 @@ def logout():
     return redirect("/")
 
 # ================= RUN ====================
-if __name__ == "__main__":
-    app.run()
+if __name__=="__main__":
+    app.run(host="0.0.0.0", port=5000)
