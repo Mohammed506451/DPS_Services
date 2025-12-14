@@ -26,6 +26,7 @@ def get_db():
 def init_db():
     conn = get_db()
     cur = conn.cursor()
+    # Users
     cur.execute("""
     CREATE TABLE IF NOT EXISTS users (
         user_id BIGINT PRIMARY KEY,
@@ -33,6 +34,7 @@ def init_db():
         balance NUMERIC DEFAULT 0
     )
     """)
+    # Topups
     cur.execute("""
     CREATE TABLE IF NOT EXISTS topups (
         id SERIAL PRIMARY KEY,
@@ -40,6 +42,16 @@ def init_db():
         amount NUMERIC,
         status TEXT DEFAULT 'pending',
         method TEXT
+    )
+    """)
+    # Products
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS products (
+        id SERIAL PRIMARY KEY,
+        category TEXT,
+        name TEXT,
+        price NUMERIC,
+        message TEXT
     )
     """)
     conn.commit()
@@ -67,14 +79,9 @@ def main_menu(lang):
         ])
 
 def back_button(lang):
-    if lang == "ar":
-        return InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="🔙 العودة", callback_data="back")]
-        ])
-    else:
-        return InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="🔙 Back", callback_data="back")]
-        ])
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="🔙 Back" if lang=="en" else "🔙 العودة", callback_data="back")]
+    ])
 
 # ================= START ====================
 @dp.message(CommandStart())
@@ -98,9 +105,8 @@ async def start(message: types.Message):
     conn.close()
 
     if row and row[0]:
-        # user already has language
         lang = row[0]
-        await message.answer("Main Menu" if lang == "en" else "القائمة الرئيسية", reply_markup=main_menu(lang))
+        await message.answer("Main Menu" if lang=="en" else "القائمة الرئيسية", reply_markup=main_menu(lang))
     else:
         await message.answer("Choose language / اختر اللغة", reply_markup=lang_keyboard())
 
@@ -113,21 +119,21 @@ async def set_language(call: CallbackQuery):
     cur.execute("UPDATE users SET lang=%s WHERE user_id=%s", (lang, call.from_user.id))
     conn.commit()
     conn.close()
-    await call.message.edit_text("Main Menu" if lang == "en" else "القائمة الرئيسية", reply_markup=main_menu(lang))
+    await call.message.edit_text("Main Menu" if lang=="en" else "القائمة الرئيسية", reply_markup=main_menu(lang))
 
 # ================= SERVICES =================
 @dp.callback_query(lambda c: c.data == "services")
 async def show_services(call: CallbackQuery):
     conn = get_db()
     cur = conn.cursor()
-    cur.execute("SELECT lang, balance FROM users WHERE user_id=%s", (call.from_user.id,))
-    lang, balance = cur.fetchone()
+    cur.execute("SELECT lang FROM users WHERE user_id=%s", (call.from_user.id,))
+    lang = cur.fetchone()[0]
     cur.execute("SELECT DISTINCT category FROM products ORDER BY id")
     categories = cur.fetchall()
     conn.close()
 
     if not categories:
-        await call.message.answer("No services available" if lang == "en" else "لا توجد خدمات")
+        await call.message.answer("No services available" if lang=="en" else "لا توجد خدمات")
         return
 
     kb = InlineKeyboardMarkup()
@@ -170,14 +176,12 @@ async def buy_product(call: CallbackQuery):
     balance = cur.fetchone()[0]
 
     name, price, message_text = product
-    lang = "en"  # default
     if balance >= price:
-        cur.execute("UPDATE users SET balance=balance-%s, total_spent=total_spent+%s WHERE user_id=%s",
-                    (price, price, call.from_user.id))
+        cur.execute("UPDATE users SET balance=balance-%s WHERE user_id=%s", (price, call.from_user.id))
         conn.commit()
-        await call.message.answer(f"✅ {name} purchased for ${price}\nMessage:\n{message_text}")
+        await call.message.answer(f"✅ You purchased {name} for ${price}\nMessage:\n{message_text}")
     else:
-        await call.message.answer("❌ Not enough balance" if lang=="en" else "رصيد غير كافٍ")
+        await call.message.answer("❌ Not enough balance" if balance<price else "")
     conn.close()
 
 # ================= BALANCE / TOPUP =================
