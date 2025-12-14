@@ -37,6 +37,7 @@ def init_db():
         id SERIAL PRIMARY KEY,
         user_id BIGINT,
         amount NUMERIC,
+        method TEXT,
         status TEXT DEFAULT 'pending'
     )
     """)
@@ -72,49 +73,32 @@ def lang_keyboard():
 def main_menu(lang):
     if lang == "ar":
         return InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="🛒 الخدمات", callback_data="services")],
+            [InlineKeyboardButton(text="PayPal Services", callback_data="cat_paypal")],
+            [InlineKeyboardButton(text="SSN Services", callback_data="cat_ssn")],
+            [InlineKeyboardButton(text="Visa Card", callback_data="cat_visa")],
+            [InlineKeyboardButton(text="Email", callback_data="cat_email")],
             [InlineKeyboardButton(text="💰 الرصيد", callback_data="balance")]
         ])
     else:
         return InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="🛒 Services", callback_data="services")],
+            [InlineKeyboardButton(text="PayPal Services", callback_data="cat_paypal")],
+            [InlineKeyboardButton(text="SSN Services", callback_data="cat_ssn")],
+            [InlineKeyboardButton(text="Visa Card", callback_data="cat_visa")],
+            [InlineKeyboardButton(text="Email", callback_data="cat_email")],
             [InlineKeyboardButton(text="💰 Balance", callback_data="balance")]
-        ])
-
-def service_categories_keyboard(lang):
-    if lang=="ar":
-        return InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="PayPal Services", callback_data="cat_paypal")],
-            [InlineKeyboardButton(text="SSN Services", callback_data="cat_ssn")],
-            [InlineKeyboardButton(text="Visa Card", callback_data="cat_visa")],
-            [InlineKeyboardButton(text="Email", callback_data="cat_email")],
-            [InlineKeyboardButton(text="⬅️ رجوع", callback_data="back")]
-        ])
-    else:
-        return InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="PayPal Services", callback_data="cat_paypal")],
-            [InlineKeyboardButton(text="SSN Services", callback_data="cat_ssn")],
-            [InlineKeyboardButton(text="Visa Card", callback_data="cat_visa")],
-            [InlineKeyboardButton(text="Email", callback_data="cat_email")],
-            [InlineKeyboardButton(text="⬅️ Back", callback_data="back")]
         ])
 
 def service_subcategory_keyboard(category, lang):
     buttons = []
-    if category=="cat_paypal":
-        if lang=="en":
-            buttons = [
-                [InlineKeyboardButton("USA PayPal", callback_data="sub_us")],
-                [InlineKeyboardButton("UK PayPal", callback_data="sub_uk")],
-                [InlineKeyboardButton("Canada PayPal", callback_data="sub_ca")],
-            ]
-        else:
-            buttons = [
-                [InlineKeyboardButton("USA PayPal", callback_data="sub_us")],
-                [InlineKeyboardButton("UK PayPal", callback_data="sub_uk")],
-                [InlineKeyboardButton("Canada PayPal", callback_data="sub_ca")],
-            ]
-    buttons.append([InlineKeyboardButton(text="⬅️ Back", callback_data="services")])
+    if category == "cat_paypal":
+        buttons = [
+            [InlineKeyboardButton("USA PayPal", callback_data="sub_us")],
+            [InlineKeyboardButton("UK PayPal", callback_data="sub_uk")],
+            [InlineKeyboardButton("Canada PayPal", callback_data="sub_ca")],
+        ]
+    # For other categories you can add subcategories if needed
+    back_text = "⬅️ Back" if lang == "en" else "⬅️ رجوع"
+    buttons.append([InlineKeyboardButton(back_text, callback_data="main_menu")])
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
 def service_items_keyboard(subcategory, lang):
@@ -125,7 +109,7 @@ def service_items_keyboard(subcategory, lang):
     conn.close()
     buttons = [[InlineKeyboardButton(f"{i[1]} - ${i[2]}", callback_data=f"buy_{i[0]}")] for i in items]
     back_text = "⬅️ Back" if lang=="en" else "⬅️ رجوع"
-    buttons.append([InlineKeyboardButton(back_text, callback_data="cat_paypal")])
+    buttons.append([InlineKeyboardButton(back_text, callback_data="sub_"+subcategory)])
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
 def payment_methods_keyboard():
@@ -133,7 +117,7 @@ def payment_methods_keyboard():
         [InlineKeyboardButton(text="Binance", callback_data="pay_binance")],
         [InlineKeyboardButton(text="CoinEX", callback_data="pay_coinex")],
         [InlineKeyboardButton(text="Crypto", callback_data="pay_crypto")],
-        [InlineKeyboardButton(text="⬅️ Back", callback_data="back")]
+        [InlineKeyboardButton(text="⬅️ Back", callback_data="main_menu")]
     ])
 
 # ================= START ====================
@@ -146,9 +130,9 @@ async def start(message: types.Message):
     conn = get_db()
     cur = conn.cursor()
     cur.execute("INSERT INTO users (user_id) VALUES (%s) ON CONFLICT DO NOTHING", (message.from_user.id,))
-    conn.commit()
     cur.execute("SELECT lang FROM users WHERE user_id=%s", (message.from_user.id,))
     row = cur.fetchone()
+    conn.commit()
     conn.close()
 
     if row and row[0]:
@@ -168,17 +152,17 @@ async def set_language(call: types.CallbackQuery):
     conn.close()
     await call.message.edit_text("Main Menu" if lang=="en" else "القائمة الرئيسية", reply_markup=main_menu(lang))
 
-# ================= SERVICES =================
-@dp.callback_query(lambda c: c.data=="services")
-async def show_service_categories(call: types.CallbackQuery):
+# ================= MAIN MENU =================
+@dp.callback_query(lambda c: c.data=="main_menu")
+async def go_main_menu(call: types.CallbackQuery):
     conn = get_db()
     cur = conn.cursor()
     cur.execute("SELECT lang FROM users WHERE user_id=%s", (call.from_user.id,))
     lang = cur.fetchone()[0]
     conn.close()
-    await call.message.edit_text("Select Category" if lang=="en" else "اختر التصنيف", reply_markup=service_categories_keyboard(lang))
+    await call.message.edit_text("Main Menu" if lang=="en" else "القائمة الرئيسية", reply_markup=main_menu(lang))
 
-# ================= SERVICE SUBCATEGORY =================
+# ================= SERVICE CATEGORIES =================
 @dp.callback_query(lambda c: c.data.startswith("cat_"))
 async def show_subcategory(call: types.CallbackQuery):
     conn = get_db()
@@ -191,12 +175,13 @@ async def show_subcategory(call: types.CallbackQuery):
 # ================= SERVICE ITEMS =================
 @dp.callback_query(lambda c: c.data.startswith("sub_"))
 async def show_items(call: types.CallbackQuery):
+    subcat = call.data.split("_")[1]
     conn = get_db()
     cur = conn.cursor()
     cur.execute("SELECT lang FROM users WHERE user_id=%s", (call.from_user.id,))
     lang = cur.fetchone()[0]
     conn.close()
-    await call.message.edit_text("Select Item" if lang=="en" else "اختر المنتج", reply_markup=service_items_keyboard(call.data, lang))
+    await call.message.edit_text("Select Item" if lang=="en" else "اختر المنتج", reply_markup=service_items_keyboard(subcat, lang))
 
 # ================= PURCHASE CONFIRMATION =================
 @dp.callback_query(lambda c: c.data.startswith("buy_"))
@@ -214,10 +199,9 @@ async def confirm_purchase(call: types.CallbackQuery):
         await call.message.answer(f"❌ Not enough balance. Your balance: ${balance}")
         return
 
-    # Confirmation buttons
     kb = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="Confirm ✅", callback_data=f"pay_{item_id}")],
-        [InlineKeyboardButton(text="Cancel ❌", callback_data="back")]
+        [InlineKeyboardButton("Confirm ✅", callback_data=f"pay_{item_id}")],
+        [InlineKeyboardButton("Cancel ❌", callback_data="main_menu")]
     ])
     await call.message.answer(f"💰 You are buying {item[0]} for ${item[1]}", reply_markup=kb)
 
@@ -241,7 +225,7 @@ async def finalize_purchase(call: types.CallbackQuery):
 
 # ================= BALANCE / TOPUP ====================
 @dp.callback_query(lambda c: c.data=="balance")
-async def topup_menu(call: types.CallbackQuery):
+async def balance_menu(call: types.CallbackQuery):
     await call.message.edit_text("Select payment method:", reply_markup=payment_methods_keyboard())
 
 @dp.message(lambda m: m.text and m.text.isdigit())
@@ -253,16 +237,6 @@ async def create_topup(message: types.Message):
     conn.commit()
     conn.close()
     await message.answer("✅ Top-up request sent. Wait for admin approval.")
-
-# ================= BACK BUTTON =================
-@dp.callback_query(lambda c: c.data=="back")
-async def go_back(call: types.CallbackQuery):
-    conn = get_db()
-    cur = conn.cursor()
-    cur.execute("SELECT lang FROM users WHERE user_id=%s", (call.from_user.id,))
-    lang = cur.fetchone()[0]
-    conn.close()
-    await call.message.edit_text("Main Menu" if lang=="en" else "القائمة الرئيسية", reply_markup=main_menu(lang))
 
 # ================= RUN =====================
 async def main():
