@@ -1,11 +1,9 @@
-import os
 import psycopg2
 from psycopg2.extras import RealDictCursor
 from aiogram import Bot, Dispatcher, types
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.utils import executor
 
-# ===== CONFIGURATION =====
 API_TOKEN = "6872510077:AAFtVniM9OJRPDkjozI8hU52AvoDZ7njtsI"
 ADMIN_USERNAME = "MD18073"
 DATABASE_URL = "postgresql://postgres:wTWqoVJnKEDRtDDWFlpJNfSGGRdYCJHB@nozomi.proxy.rlwy.net:22169/railway"
@@ -13,11 +11,9 @@ DATABASE_URL = "postgresql://postgres:wTWqoVJnKEDRtDDWFlpJNfSGGRdYCJHB@nozomi.pr
 bot = Bot(token=API_TOKEN)
 dp = Dispatcher(bot)
 
-# ===== DATABASE CONNECTION =====
 def get_db():
     return psycopg2.connect(DATABASE_URL, cursor_factory=RealDictCursor)
 
-# ===== START COMMAND =====
 @dp.message_handler(commands=["start"])
 async def start(message: types.Message):
     keyboard = InlineKeyboardMarkup()
@@ -27,22 +23,16 @@ async def start(message: types.Message):
     )
     await message.reply("Choose your language / اختر لغتك", reply_markup=keyboard)
 
-# ===== CALLBACK HANDLER =====
 @dp.callback_query_handler(lambda c: c.data.startswith("lang_"))
 async def choose_language(callback_query: types.CallbackQuery):
     lang = callback_query.data.split("_")[1]
-
     keyboard = InlineKeyboardMarkup()
-    # Admin menu
     if callback_query.from_user.username == ADMIN_USERNAME:
         keyboard.add(InlineKeyboardButton("Admin Panel", callback_data="admin_panel"))
-    # User menu
     keyboard.add(InlineKeyboardButton("Show Services", callback_data="show_services"))
-
     await bot.send_message(callback_query.from_user.id, "Main menu:", reply_markup=keyboard)
     await callback_query.answer()
 
-# ===== GET SERVICES =====
 def get_services_keyboard():
     db = get_db()
     cur = db.cursor()
@@ -50,13 +40,11 @@ def get_services_keyboard():
     cur.execute("SELECT * FROM products")
     rows = cur.fetchall()
     db.close()
-
     buttons = []
     for r in rows:
         buttons.append([InlineKeyboardButton(f"{r['name']} - ${r['price']}", callback_data=f"buy_{r['id']}")])
     return InlineKeyboardMarkup(buttons)
 
-# ===== SHOW SERVICES =====
 @dp.callback_query_handler(lambda c: c.data == "show_services")
 async def show_services(callback_query: types.CallbackQuery):
     keyboard = get_services_keyboard()
@@ -66,7 +54,6 @@ async def show_services(callback_query: types.CallbackQuery):
         await bot.send_message(callback_query.from_user.id, "Choose a service:", reply_markup=keyboard)
     await callback_query.answer()
 
-# ===== BUY SERVICE =====
 @dp.callback_query_handler(lambda c: c.data.startswith("buy_"))
 async def buy_service(callback_query: types.CallbackQuery):
     service_id = int(callback_query.data.split("_")[1])
@@ -75,22 +62,19 @@ async def buy_service(callback_query: types.CallbackQuery):
     cur.execute("SELECT * FROM products WHERE id=%s", (service_id,))
     service = cur.fetchone()
     db.close()
-
     if service:
         await bot.send_message(callback_query.from_user.id, f"You selected: {service['name']} - ${service['price']}")
     else:
         await bot.send_message(callback_query.from_user.id, "Service not found.")
     await callback_query.answer()
 
-# ===== ADMIN PANEL =====
 @dp.callback_query_handler(lambda c: c.data == "admin_panel")
 async def admin_panel(callback_query: types.CallbackQuery):
     if callback_query.from_user.username == ADMIN_USERNAME:
-        await bot.send_message(callback_query.from_user.id, "Admin panel features coming soon!")
+        await bot.send_message(callback_query.from_user.id, "Admin panel coming soon!")
     else:
         await bot.send_message(callback_query.from_user.id, "❌ You are not an admin.")
     await callback_query.answer()
 
-# ===== RUN BOT =====
 if __name__ == "__main__":
     executor.start_polling(dp, skip_updates=True)
