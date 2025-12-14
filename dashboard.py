@@ -9,12 +9,12 @@ ADMIN_PASSWORD = "Mohammed@7756"
 DATABASE_URL = os.environ.get("DATABASE_URL")
 
 def get_db():
-    conn = psycopg2.connect(DATABASE_URL, cursor_factory=RealDictCursor)
-    return conn
+    return psycopg2.connect(DATABASE_URL, cursor_factory=RealDictCursor)
 
 def init_db():
     conn = get_db()
     cur = conn.cursor()
+    # Auto-create tables if missing
     cur.execute("""
         CREATE TABLE IF NOT EXISTS users (
             user_id BIGINT PRIMARY KEY,
@@ -66,7 +66,6 @@ def topups():
     cur.execute("SELECT * FROM topup_requests")
     rows = cur.fetchall()
     conn.close()
-
     html = "<h2>Top-up Requests</h2><table border='1' cellpadding='5'><tr><th>ID</th><th>Username</th><th>Amount</th><th>Status</th><th>Action</th></tr>"
     for r in rows:
         html += f"<tr><td>{r['id']}</td><td>{r['username']}</td><td>{r['amount']}</td><td>{r['status']}</td><td>"
