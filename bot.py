@@ -24,15 +24,24 @@ def get_db():
 def init_db():
     conn = get_db()
     cur = conn.cursor()
-
+    # Users table
     cur.execute("""
     CREATE TABLE IF NOT EXISTS users (
         user_id BIGINT PRIMARY KEY,
+        username TEXT,
         balance NUMERIC DEFAULT 0,
         lang TEXT
     )
     """)
-
+    # Services table
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS services (
+        id SERIAL PRIMARY KEY,
+        name TEXT NOT NULL,
+        price NUMERIC NOT NULL
+    )
+    """)
+    # Top-ups table
     cur.execute("""
     CREATE TABLE IF NOT EXISTS topups (
         id SERIAL PRIMARY KEY,
@@ -41,7 +50,6 @@ def init_db():
         status TEXT DEFAULT 'pending'
     )
     """)
-
     conn.commit()
     conn.close()
 
@@ -71,20 +79,19 @@ def main_menu(lang):
 async def start(message: types.Message):
     conn = get_db()
     cur = conn.cursor()
-    cur.execute("INSERT INTO users (user_id) VALUES (%s) ON CONFLICT DO NOTHING", (message.from_user.id,))
+    cur.execute("""
+    INSERT INTO users (user_id, username) VALUES (%s, %s)
+    ON CONFLICT (user_id) DO NOTHING
+    """, (message.from_user.id, message.from_user.username))
     conn.commit()
     conn.close()
 
-    await message.answer(
-        "Choose language / اختر اللغة",
-        reply_markup=lang_keyboard()
-    )
+    await message.answer("Choose language / اختر اللغة", reply_markup=lang_keyboard())
 
 # ================= LANGUAGE =================
 @dp.callback_query(lambda c: c.data.startswith("lang_"))
 async def set_language(call: types.CallbackQuery):
     lang = call.data.split("_")[1]
-
     conn = get_db()
     cur = conn.cursor()
     cur.execute("UPDATE users SET lang=%s WHERE user_id=%s", (lang, call.from_user.id))
@@ -101,48 +108,40 @@ async def set_language(call: types.CallbackQuery):
 async def show_services(call: types.CallbackQuery):
     conn = get_db()
     cur = conn.cursor()
-
     cur.execute("SELECT lang, balance FROM users WHERE user_id=%s", (call.from_user.id,))
     lang, balance = cur.fetchone()
 
     cur.execute("SELECT name, price FROM services ORDER BY id")
     services = cur.fetchall()
-
     conn.close()
 
     if not services:
-        await call.message.answer("No services available")
+        await call.message.answer("No services available" if lang=="en" else "لا توجد خدمات")
         return
 
-    text = "🛒 Services:\n\n" if lang == "en" else "🛒 الخدمات:\n\n"
+    text = "🛒 Services:\n\n" if lang=="en" else "🛒 الخدمات:\n\n"
     for s in services:
         text += f"{s[0]} — ${s[1]}\n"
 
     text += f"\n💰 Balance: ${balance}"
-
     await call.message.answer(text)
 
 # ================= TOPUP ====================
 @dp.callback_query(lambda c: c.data == "topup")
 async def topup(call: types.CallbackQuery):
     await call.message.answer(
-        "Send amount like: 10\nAdmin will approve manually"
+        "Send amount like: 10\nAdmin will approve manually" 
         if True else ""
     )
 
 @dp.message(lambda m: m.text and m.text.isdigit())
 async def create_topup(message: types.Message):
     amount = int(message.text)
-
     conn = get_db()
     cur = conn.cursor()
-    cur.execute(
-        "INSERT INTO topups (user_id, amount) VALUES (%s, %s)",
-        (message.from_user.id, amount)
-    )
+    cur.execute("INSERT INTO topups (user_id, amount) VALUES (%s, %s)", (message.from_user.id, amount))
     conn.commit()
     conn.close()
-
     await message.answer("✅ Top-up request sent. Wait for admin approval.")
 
 # ================= RUN =====================
