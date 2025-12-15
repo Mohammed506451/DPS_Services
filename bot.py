@@ -124,9 +124,99 @@ async def show_category(call: types.CallbackQuery):
         ]
         await call.message.edit_text("Select PayPal region:" if lang=="en" else "اختر منطقة بايبال", reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons))
     else:
-        # Placeholder for other categories
         await call.message.answer("Category not implemented yet.")
         await call.message.edit_reply_markup(reply_markup=InlineKeyboardMarkup(inline_keyboard=[back_button]))
+
+# ================= SUBCATEGORIES =================
+@dp.callback_query(lambda c: c.data.startswith("sub_"))
+async def show_subcategory(call: types.CallbackQuery):
+    conn = get_db()
+    cur = conn.cursor()
+    cur.execute("SELECT lang FROM users WHERE user_id=%s", (call.from_user.id,))
+    lang = cur.fetchone()[0]
+    conn.close()
+
+    back_button = [InlineKeyboardButton("⬅️ Back" if lang=="en" else "⬅️ رجوع", callback_data="cat_paypal")]
+
+    if call.data == "sub_us":
+        buttons = [
+            [InlineKeyboardButton("PayPal linked SSN", callback_data="buy_ssn")],
+            [InlineKeyboardButton("PayPal linked Bank", callback_data="buy_bank")],
+            [InlineKeyboardButton("PayPal linked Visa", callback_data="buy_visa")],
+            back_button
+        ]
+        await call.message.edit_text("Select product:" if lang=="en" else "اختر المنتج", reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons))
+    else:
+        await call.message.answer("This subcategory is not implemented yet.")
+        await call.message.edit_reply_markup(reply_markup=InlineKeyboardMarkup(inline_keyboard=[back_button]))
+
+# ================= PURCHASE CONFIRMATION =================
+@dp.callback_query(lambda c: c.data.startswith("buy_"))
+async def confirm_purchase(call: types.CallbackQuery):
+    conn = get_db()
+    cur = conn.cursor()
+    cur.execute("SELECT lang, balance FROM users WHERE user_id=%s", (call.from_user.id,))
+    lang, balance = cur.fetchone()
+    conn.close()
+
+    product_prices = {
+        "buy_ssn": 10,
+        "buy_bank": 20,
+        "buy_visa": 30
+    }
+
+    product_names = {
+        "buy_ssn": "PayPal linked SSN",
+        "buy_bank": "PayPal linked Bank",
+        "buy_visa": "PayPal linked Visa"
+    }
+
+    price = product_prices[call.data]
+    product = product_names[call.data]
+
+    if balance < price:
+        await call.message.answer("❌ Not enough balance!" if lang=="en" else "❌ الرصيد غير كافي!")
+        return
+
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton("✅ Confirm" if lang=="en" else "✅ تأكيد", callback_data=f"confirm_{call.data}")],
+        [InlineKeyboardButton("❌ Cancel" if lang=="en" else "❌ إلغاء", callback_data=f"cancel_{call.data}")]
+    ])
+    await call.message.edit_text(f"{product}\nPrice: ${price}\nConfirm?" if lang=="en" else f"{product}\nالسعر: ${price}\nتأكيد؟", reply_markup=keyboard)
+
+# ================= HANDLE CONFIRM/CANCEL =================
+@dp.callback_query(lambda c: c.data.startswith("confirm_") or c.data.startswith("cancel_"))
+async def handle_confirm_cancel(call: types.CallbackQuery):
+    action, product_key = call.data.split("_", 1)
+    conn = get_db()
+    cur = conn.cursor()
+    cur.execute("SELECT lang, balance FROM users WHERE user_id=%s", (call.from_user.id,))
+    lang, balance = cur.fetchone()
+
+    product_prices = {
+        "ssn": 10,
+        "bank": 20,
+        "visa": 30
+    }
+
+    product_names = {
+        "ssn": "PayPal linked SSN",
+        "bank": "PayPal linked Bank",
+        "visa": "PayPal linked Visa"
+    }
+
+    price = product_prices[product_key]
+    product = product_names[product_key]
+
+    if action=="confirm":
+        # Deduct balance
+        new_balance = balance - price
+        cur.execute("UPDATE users SET balance=%s WHERE user_id=%s", (new_balance, call.from_user.id))
+        conn.commit()
+        await call.message.edit_text(f"✅ {product} purchased!\nNew balance: ${new_balance}" if lang=="en" else f"✅ تم شراء {product}\nالرصيد الجديد: ${new_balance}")
+    else:
+        await call.message.edit_text("❌ Purchase canceled" if lang=="en" else "❌ تم إلغاء الشراء")
+    conn.close()
 
 # ================= BACK TO MAIN MENU =================
 @dp.callback_query(lambda c: c.data=="main_menu")
@@ -136,7 +226,6 @@ async def back_main(call: types.CallbackQuery):
     cur.execute("SELECT lang FROM users WHERE user_id=%s", (call.from_user.id,))
     lang = cur.fetchone()[0]
     conn.close()
-
     await call.message.edit_text("Main Menu" if lang=="en" else "القائمة الرئيسية",
                                  reply_markup=main_menu(lang))
 
