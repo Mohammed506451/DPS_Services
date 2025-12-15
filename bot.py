@@ -88,7 +88,7 @@ async def set_language(call: types.CallbackQuery):
     conn.commit()
     conn.close()
 
-    await call.message.edit_text(
+    await call.message.answer(
         "Main Menu" if lang == "en" else "القائمة الرئيسية",
         reply_markup=main_menu(lang)
     )
@@ -102,22 +102,19 @@ async def show_category(call: types.CallbackQuery):
     lang = cur.fetchone()[0]
     conn.close()
 
-    back_button = [InlineKeyboardButton("⬅️ Back" if lang=="en" else "⬅️ رجوع", callback_data="main_menu")]
-
     if call.data == "cat_paypal":
         buttons = [
             [InlineKeyboardButton("PayPal USA", callback_data="sub_us")],
             [InlineKeyboardButton("PayPal Canada", callback_data="sub_ca")],
             [InlineKeyboardButton("PayPal UK", callback_data="sub_uk")],
-            back_button
+            [InlineKeyboardButton("⬅️ Back" if lang=="en" else "⬅️ رجوع", callback_data="main_menu")]
         ]
-        await call.message.edit_text(
+        await call.message.answer(
             "Select PayPal region:" if lang=="en" else "اختر منطقة بايبال",
             reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons)
         )
     else:
         await call.message.answer("Category not implemented yet.")
-        await call.message.edit_reply_markup(reply_markup=InlineKeyboardMarkup(inline_keyboard=[back_button]))
 
 # ================= SUB-CATEGORIES =================
 @dp.callback_query(lambda c: c.data.startswith("sub_"))
@@ -128,16 +125,14 @@ async def show_subcategory(call: types.CallbackQuery):
     lang = cur.fetchone()[0]
     conn.close()
 
-    back_button = [InlineKeyboardButton("⬅️ Back" if lang=="en" else "⬅️ رجوع", callback_data="cat_paypal")]
-
     buttons = [
         [InlineKeyboardButton("PayPal Linked SSN", callback_data="buy_ssn")],
         [InlineKeyboardButton("PayPal Linked Bank", callback_data="buy_bank")],
         [InlineKeyboardButton("PayPal Linked Visa", callback_data="buy_visa")],
-        back_button
+        [InlineKeyboardButton("⬅️ Back" if lang=="en" else "⬅️ رجوع", callback_data="cat_paypal")]
     ]
 
-    await call.message.edit_text(
+    await call.message.answer(
         "Select service:" if lang=="en" else "اختر الخدمة",
         reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons)
     )
@@ -155,7 +150,6 @@ async def purchase_service(call: types.CallbackQuery):
     if not service_name:
         return
 
-    # In real scenario, check balance and deduct
     await call.message.answer(f"✅ You are about to buy: {service_name}\nPlease confirm or cancel.")
 
 # ================= BACK TO MAIN MENU =================
@@ -166,7 +160,7 @@ async def go_main(call: types.CallbackQuery):
     cur.execute("SELECT lang FROM users WHERE user_id=%s", (call.from_user.id,))
     lang = cur.fetchone()[0]
     conn.close()
-    await call.message.edit_text(
+    await call.message.answer(
         "Main Menu" if lang=="en" else "القائمة الرئيسية",
         reply_markup=main_menu(lang)
     )
