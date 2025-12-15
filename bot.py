@@ -15,7 +15,7 @@ DATABASE_URL = os.getenv(
 )
 
 bot = Bot(token=BOT_TOKEN)
-dp = Dispatcher(bot)
+dp = Dispatcher()  # Corrected: no bot parameter here
 
 # ================= DATABASE =================
 def get_db():
@@ -113,7 +113,6 @@ async def start(message: types.Message):
     cur.execute("SELECT * FROM users WHERE user_id=%s", (message.from_user.id,))
     user = cur.fetchone()
     if not user:
-        # First time user: choose language
         cur.execute("INSERT INTO users (user_id) VALUES (%s)", (message.from_user.id,))
         conn.commit()
         await message.answer("Choose language / اختر اللغة", reply_markup=lang_keyboard())
@@ -151,7 +150,6 @@ async def buy_product(call: types.CallbackQuery):
     product_id = int(call.data.split("_")[1])
     conn = get_db()
     cur = conn.cursor()
-    # Get user balance and product price
     cur.execute("SELECT balance FROM users WHERE user_id=%s", (call.from_user.id,))
     balance = cur.fetchone()[0]
     cur.execute("SELECT name, price FROM services WHERE id=%s", (product_id,))
